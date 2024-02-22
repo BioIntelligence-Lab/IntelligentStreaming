@@ -1,6 +1,6 @@
 data
-results/*
-output/*
+results
+output
 test.ipynb
 
 # Byte-compiled / optimized / DLL files
