@@ -38,15 +38,19 @@ def __encode2d_worker(
     img = ds.get_fdata()
   else:
     raise ValueError(f'Invalid format! Acceptable formats: {VALID_FORMATS_2D}')
-  # Determine pixel intensity range 
-  min_intensity, max_intensity = np.min(img), np.max(img)
-  # Check precision of input image
-  if img.dtype != np.uint8 or img.dtype != np.uint16:
-    # Check if input image exceeds precision supported by uint16
-    if min_intensity < 0 or max_intensity > UINT16_MAX:
-      rescale_intensity = True
-      # Rescale intensities to avoid clipping and lossy compress
-      img = rescale_intensities(img, (min_intensity, max_intensity), (0, UINT16_MAX))
+  #### OLD
+  # # Determine pixel intensity range 
+  # min_intensity, max_intensity = np.min(img), np.max(img)
+  # # Check precision of input image
+  # if img.dtype != np.uint8 or img.dtype != np.uint16:
+  #   # Check if input image exceeds precision supported by uint16
+  #   if min_intensity < 0 or max_intensity > UINT16_MAX:
+  #     rescale_intensity = True
+  #     # Rescale intensities to avoid clipping and lossy compress
+  #     img = rescale_intensities(img, (min_intensity, max_intensity), (0, UINT16_MAX))
+  #### NEW
+  scl_intercept, scl_slope = calculate_rescale_attributes(img)
+  img = encoder_apply_rescale_attributes(img, scl_intercept, scl_slope)
   # Calculate number of decompositon levels
   num_decomps = calculate_num_decomps(img.shape)
   output_path = os.path.join(
@@ -65,11 +69,12 @@ def __encode2d_worker(
   )
   # Return encoding metadata
   x, y = img.shape
-  markers = ojph.get_scan_markers(output_path)
-  if rescale_intensity:
-    return [path, x, y, num_decomps, int(rescale_intensity), min_intensity, max_intensity, encode_time, markers]
-  else:
-    return [path, x, y, num_decomps, int(rescale_intensity), np.nan, np.nan, encode_time, markers]
+  markers = get_scan_markers(output_path)
+  # if rescale_intensity:
+  #   return [path, x, y, num_decomps, int(rescale_intensity), min_intensity, max_intensity, encode_time, markers]
+  # else:
+  #   return [path, x, y, num_decomps, int(rescale_intensity), np.nan, np.nan, encode_time, markers]
+  return np.array([path, x, y, num_decomps, scl_intercept, scl_slope, encode_time, markers], dtype=object)
 
 def encode2d(
   paths,
@@ -103,9 +108,13 @@ def encode2d(
     for path in paths:
       encode_metadata += [__encode2d_worker(path, input_dir, output_dir)]
   # Save encoding metadata
+  # pd.DataFrame(
+  #   np.array(encode_metadata, dtype=object),
+  #   columns = ['image', 'x', 'y', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity', 'encode_time', 'markers']
+  # ).sort_values('image').to_csv(os.path.join(output_dir, 'encode_metadata.csv'), index=False)
   pd.DataFrame(
     np.array(encode_metadata, dtype=object),
-    columns = ['image', 'x', 'y', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity', 'encode_time', 'markers']
+    columns = ['image', 'x', 'y', 'num_decomps', 'scl_intercept', 'scl_slope', 'encode_time', 'markers']
   ).sort_values('image').to_csv(os.path.join(output_dir, 'encode_metadata.csv'), index=False)
 
 #### Encoder 3D
@@ -133,23 +142,24 @@ def __encode3d_worker(
         img = ds.get_fdata()
     else:
       raise ValueError(f'Invalid format! Acceptable formats: {VALID_FORMATS_3D}')
-    # Determine pixel intensity range 
-    min_intensity, max_intensity = np.min(img), np.max(img)
-    # Check precision of input image
-    if img.dtype != np.uint8 or img.dtype != np.uint16:
-      # Check if input image exceeds precision supported by uint16
-      if min_intensity < 0 or max_intensity > UINT16_MAX:
-        rescale_intensity = True
+    # # Determine pixel intensity range 
+    # min_intensity, max_intensity = np.min(img), np.max(img)
+    # # Check precision of input image
+    # if img.dtype != np.uint8 or img.dtype != np.uint16:
+    #   # Check if input image exceeds precision supported by uint16
+    #   if min_intensity < 0 or max_intensity > UINT16_MAX:
+    #     rescale_intensity = True
+    scl_intercept, scl_slope = calculate_rescale_attributes(img)
     metadata = []
     x, y = img.shape[:2]
     slices = img.shape[-1]
     for slice in range(slices):
       img_slice = img[:,:,slice]
-      # Rescale intensities to avoid clipping and lossy compress
-      if rescale_intensity:
-        img_slice = rescale_intensities(img_slice, (min_intensity, max_intensity), (0, UINT16_MAX))
+      # if rescale_intensity:
+      #   img_slice = rescale_intensities(img_slice, (min_intensity, max_intensity), (0, UINT16_MAX))
+      img_slice = encoder_apply_rescale_attributes(img_slice, scl_intercept, scl_slope)
       # Calculate number of decompositon levels
-      num_decomps = calculate_num_decomps(img.shape)
+      num_decomps = calculate_num_decomps(img_slice.shape)
       output_path = os.path.join(
         output_dir, 
         'htj2k', 
@@ -166,12 +176,13 @@ def __encode3d_worker(
         tileparts = Tileparts.R
       )
       # Return encoding metadata
-      markers = ojph.get_scan_markers(output_path)
-      if rescale_intensity:
-        metadata += [[path, slice+1, slices, x, y, num_decomps, int(rescale_intensity), min_intensity, max_intensity, encode_time, markers]]
-      else:
-        metadata += [[path, slice+1, slices, x, y, num_decomps, int(rescale_intensity), np.nan, np.nan, encode_time, markers]]
-    return metadata
+      markers = get_scan_markers(output_path)
+      # if rescale_intensity:
+      #   metadata += [[path, slice+1, slices, x, y, num_decomps, int(rescale_intensity), min_intensity, max_intensity, encode_time, markers]]
+      # else:
+      #   metadata += [[path, slice+1, slices, x, y, num_decomps, int(rescale_intensity), np.nan, np.nan, encode_time, markers]]
+      metadata += [[path, slice+1, slices, x, y, num_decomps, scl_intercept, scl_slope, encode_time, markers]]
+    return np.array(metadata, dtype=object)
   else:
     # TODO: Implement 3D data from 2D DICOM slices
     raise NotImplementedError('3D DICOM data not yet supported')
@@ -209,7 +220,11 @@ def encode3d(
       encode_metadata += [__encode3d_worker(path, input_dir, output_dir)]
   encode_metadata = np.concatenate(encode_metadata, axis=0)
   # Save encoding metadata
+  # pd.DataFrame(
+  #   encode_metadata,
+  #   columns = ['image', 'slice', 'total_slices', 'x', 'y', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity', 'encode_time', 'markers']
+  # ).sort_values(['image', 'slice']).to_csv(os.path.join(output_dir, 'encode_metadata.csv'), index=False)
   pd.DataFrame(
     encode_metadata,
-    columns = ['image', 'slice', 'total_slices', 'x', 'y', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity', 'encode_time', 'markers']
+    columns = ['image', 'slice', 'total_slices', 'x', 'y', 'num_decomps', 'scl_intercept', 'scl_slope', 'encode_time', 'markers']
   ).sort_values(['image', 'slice']).to_csv(os.path.join(output_dir, 'encode_metadata.csv'), index=False)

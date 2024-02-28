@@ -78,7 +78,7 @@ def npy2nifti(
       if max_workers > multiprocessing.cpu_count():
         max_workers = multiprocessing.cpu_count()
         print(f'`max_workers` exceeds max number of processes. Defaulting value to -1')
-    print(f'Using {max_workers} worker(s) to decode')
+    print(f'Using {max_workers} worker(s) to convert')
     process_map(partial(__npy2nifti_worker, nifti_dir=nifti_dir, input_dir=input_dir, output_dir=output_dir), paths, max_workers=max_workers, chunksize=1)
   else:
     for path in paths:

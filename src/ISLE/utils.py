@@ -5,6 +5,7 @@ import re
 VALID_FORMATS_2D = ('.jpeg', '.jpg', '.png', '.dcm', '.nrrd', '.nii', '.nii.gz')
 VALID_FORMATS_3D = ('.dcm', '.nrrd', '.nii', '.nii.gz')
 
+UINT8_MAX = 255
 UINT16_MAX = 65535
 
 # Utilities
@@ -52,6 +53,57 @@ def rescale_intensities(
   new_min, new_max = new_range
   np.seterr(invalid='ignore')
   return ((img - old_min)/(old_max - old_min))*(new_max - new_min) + new_min
+
+def calculate_rescale_attributes(img):
+  '''
+  Calculates the rescale intercept and slope.
+  '''
+  # If data type matches expected type, no need to rescale
+  if img.dtype == np.uint8 or img.dtype == np.uint16:
+    scl_intercept = np.nan
+    scl_slope = np.nan
+  # Determine pixel value range 
+  min_val, max_val = np.min(img), np.max(img)
+  # Calculate rescale intercept and slope
+  if min_val < 0:
+    scl_intercept = min_val
+    new_max_val = min_val + max_val
+    # Only use slope if there is clipping
+    if new_max_val > UINT16_MAX:
+      scl_slope = new_max_val/UINT16_MAX
+    else:
+      scl_slope = np.nan
+  else:
+    scl_intercept = np.nan
+    if max_val > UINT16_MAX:
+      scl_slope = max_val/UINT16_MAX
+    else:
+      scl_slope = np.nan
+  return scl_intercept, scl_slope
+
+def encoder_apply_rescale_attributes(img, scl_intercept, scl_slope):
+  '''
+  Rescales original pixel values to encoded pixel values when encoding.
+  '''
+  img_t = np.array(img, dtype=float)
+  if ~np.isnan(scl_intercept):
+    img_t = img_t - scl_intercept
+  # This step is lossy!
+  if ~np.isnan(scl_slope):
+    img_t = img_t/scl_slope 
+  return img_t
+
+def decoder_apply_rescale_attributes(img, scl_intercept, scl_slope):
+  '''
+  Rescales encoded pixel values back to original pixel values when decoding.
+  '''
+  img_t = np.array(img, dtype=float)
+  if ~np.isnan(scl_intercept):
+    img_t = img_t + scl_intercept
+  # This step is lossy!
+  if ~np.isnan(scl_slope):
+    img_t = scl_slope * img_t
+  return img_t
 
 def calculate_num_decomps(shape, x_min = 64):
   """

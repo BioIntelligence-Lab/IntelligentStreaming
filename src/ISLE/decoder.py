@@ -18,7 +18,8 @@ def __decode2d_worker(
   output_dir
 ):
   # Read metadata
-  path, num_decomps, rescale_intensity, min_intensity, max_intensity = data
+  # path, num_decomps, rescale_intensity, min_intensity, max_intensity = data
+  path, num_decomps, scl_intercept, scl_slope = data
   if decomp_level != None and decomp_level < 0:
     raise ValueError(f'Invalid scan to decode. Value must be greater than 0 but less than num_decomps: {num_decomps}')
   input_path = os.path.join(
@@ -33,9 +34,10 @@ def __decode2d_worker(
     img, decode_time = ojph.decode(input_path, skip_res=0)
   else:
     img, decode_time = ojph.decode(input_path, skip_res=num_decomps-decomp_level)
-  # Rescale pixel intensities to original range
-  if rescale_intensity:
-    img = rescale_intensities(img, new_range=(min_intensity, max_intensity))
+  # Rescale pixel values to original range
+  # if rescale_intensity:
+  #   img = rescale_intensities(img, new_range=(min_intensity, max_intensity))
+  img = decoder_apply_rescale_attributes(img, scl_intercept, scl_slope)
   # Save npz (compressed) file 
   if decomp_level == None:
     output_path = os.path.join(
@@ -70,9 +72,12 @@ def decode2d(
   if not output_dir:
     output_dir = input_dir
   encode_df = pd.read_csv(os.path.join(input_dir, 'encode_metadata.csv'))
-  if decomp_level > encode_df['num_decomps'].max():
-    raise ValueError(f'Invalid scan to decode. Value must be greater than 0 but less than num_decomps: {encode_df["num_decomps"].max()}')
-  encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity']]
+  if decomp_level == None:
+    decomp_level = encode_df['num_decomps'].max()
+  # if decomp_level > encode_df['num_decomps'].max():
+  #   raise ValueError(f'Invalid scan to decode. Value must be greater than 0 but less than num_decomps: {encode_df["num_decomps"].max()}')
+  # encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity']]
+  encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'num_decomps', 'scl_intercept', 'scl_slope']]
   data = list(encode_df.itertuples(index=False, name=None))
   # Use multiprocessing to encode images if enabled
   if use_multiprocessing:
@@ -95,16 +100,20 @@ def decode2d(
     for d in data:
       decode_metadata += [__decode2d_worker(d, decomp_level, input_dir, output_dir)]
   # Save decoding metadata
-  if decomp_level == None:
-    pd.DataFrame(
-      np.array(decode_metadata, dtype=object),
-      columns = ['image', 'decode_time']
-    ).sort_values('image').to_csv(os.path.join(output_dir, 'decode_full_metadata.csv'), index=False)
-  else:
-    pd.DataFrame(
-      np.array(decode_metadata, dtype=object),
-      columns = ['image', 'decode_time']
-    ).sort_values('image').to_csv(os.path.join(output_dir, f'decode_{decomp_level+1}_metadata.csv'), index=False)
+  # if decomp_level == None:
+  #   pd.DataFrame(
+  #     np.array(decode_metadata, dtype=object),
+  #     columns = ['image', 'decode_time']
+  #   ).sort_values('image').to_csv(os.path.join(output_dir, 'decode_full_metadata.csv'), index=False)
+  # else:
+  #   pd.DataFrame(
+  #     np.array(decode_metadata, dtype=object),
+  #     columns = ['image', 'decode_time']
+  #   ).sort_values('image').to_csv(os.path.join(output_dir, f'decode_{decomp_level+1}_metadata.csv'), index=False)
+  pd.DataFrame(
+    np.array(decode_metadata, dtype=object),
+    columns = ['image', 'decode_time']
+  ).sort_values('image').to_csv(os.path.join(output_dir, f'decode_{decomp_level+1}_metadata.csv'), index=False)
 
 #### Decoder 3D
 
@@ -115,10 +124,9 @@ def __decode3d_worker(
   output_dir
 ):
   # Read metadata
-  path, total_slices, num_decomps, rescale_intensity, min_intensity, max_intensity = data
-  if decomp_level != None:
-    if decomp_level > num_decomps or decomp_level < 0:
-      raise ValueError(f'Invalid scan to decode. Value must be greater than 0 but less than num_decomps: {num_decomps}')
+  path, total_slices, num_decomps, scl_intercept, scl_slope = data
+  if decomp_level != None and decomp_level < 0:
+    raise ValueError(f'Invalid scan to decode. Value must be greater than 0 but less than num_decomps: {num_decomps}')
   decode_time = 0
   img = []
   for slice in range(total_slices):
@@ -136,8 +144,9 @@ def __decode3d_worker(
     else:
       img_slice, decode_time_slice = ojph.decode(input_path, skip_res=num_decomps-decomp_level)
     # Rescale pixel intensities to original range
-    if rescale_intensity:
-      img = rescale_intensities(img, new_range=(min_intensity, max_intensity))
+    # if rescale_intensity:
+    #   img = rescale_intensities(img, new_range=(min_intensity, max_intensity))
+    img_slice = decoder_apply_rescale_attributes(img_slice, scl_intercept, scl_slope)
     decode_time += decode_time_slice
     img += [img_slice]
   # Restitch 3D volume
@@ -176,7 +185,10 @@ def decode3d(
   if not output_dir:
     output_dir = input_dir
   encode_df = pd.read_csv(os.path.join(input_dir, 'encode_metadata.csv'))
-  encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'total_slices', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity']].drop_duplicates('image')
+  if decomp_level == None:
+    decomp_level = encode_df['num_decomps'].max()
+  # encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'total_slices', 'num_decomps', 'rescale_intensity', 'min_intensity', 'max_intensity']].drop_duplicates('image')
+  encode_df = encode_df[encode_df['image'].isin(paths)][['image', 'total_slices', 'num_decomps', 'scl_intercept', 'scl_slope']].drop_duplicates('image')
   data = list(encode_df.itertuples(index=False, name=None))
   # Use multiprocessing to encode images if enabled
   if use_multiprocessing:
@@ -202,4 +214,4 @@ def decode3d(
   pd.DataFrame(
     np.array(decode_metadata, dtype=object),
     columns = ['image', 'total_slices', 'decode_time']
-  ).sort_values('image').to_csv(os.path.join(output_dir, 'decode_metadata.csv'), index=False)
+  ).sort_values('image').to_csv(os.path.join(output_dir, f'decode_{decomp_level+1}_metadata.csv'), index=False)
